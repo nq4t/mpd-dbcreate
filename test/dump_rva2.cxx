@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright The Music Player Daemon Project
+
+#include "config.h"
+#include "tag/Id3Load.hxx"
+#include "tag/Rva2.hxx"
+#include "tag/ReplayGainInfo.hxx"
+#include "thread/Mutex.hxx"
+#include "fs/Path.hxx"
+#include "fs/NarrowPath.hxx"
+#include "input/InputStream.hxx"
+#include "input/LocalOpen.hxx"
+#include "util/PrintException.hxx"
+
+#include <id3tag.h>
+
+#ifdef HAVE_LOCALE_H
+#include <locale.h>
+#endif
+
+#include <stdlib.h>
+#include <stdio.h>
+
+static void
+DumpReplayGainTuple(const char *name, const ReplayGainTuple &tuple)
+{
+	if (tuple.IsDefined())
+		fprintf(stderr, "replay_gain[%s]: gain=%f peak=%f\n",
+			name, (double)tuple.gain, (double)tuple.peak);
+}
+
+static void
+DumpReplayGainInfo(const ReplayGainInfo &info)
+{
+	DumpReplayGainTuple("album", info.album);
+	DumpReplayGainTuple("track", info.track);
+}
+
+int main(int argc, char **argv)
+try {
+#ifdef HAVE_LOCALE_H
+	/* initialize locale */
+	setlocale(LC_CTYPE,"");
+#endif
+
+	if (argc != 2) {
+		fprintf(stderr, "Usage: read_rva2 FILE\n");
+		return EXIT_FAILURE;
+	}
+
+	const FromNarrowPath path = argv[1];
+
+	Mutex mutex;
+
+	auto is = OpenLocalInputStream(path, mutex);
+
+	const auto tag = tag_id3_load(*is);
+	if (tag == nullptr) {
+		fprintf(stderr, "No ID3 tag found\n");
+		return EXIT_FAILURE;
+	}
+
+	ReplayGainInfo replay_gain;
+	replay_gain.Clear();
+
+	bool success = tag_rva2_parse(tag.get(), replay_gain);
+	if (!success) {
+		fprintf(stderr, "No RVA2 tag found\n");
+		return EXIT_FAILURE;
+	}
+
+	DumpReplayGainInfo(replay_gain);
+
+	return EXIT_SUCCESS;
+} catch (...) {
+	PrintException(std::current_exception());
+	return EXIT_FAILURE;
+}

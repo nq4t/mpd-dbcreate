@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright The Music Player Daemon Project
+
+#pragma once
+
+#include "ReplayGainAnalyzer.hxx"
+#include "Chrono.hxx"
+
+#include <span>
+
+constexpr auto mixramp_volumes = std::array{
+	-90., -60., -40., -30., -24., -21., -18.,
+	-15., -12., -9., -6., -3.,  0.,  3.,  6.,
+};
+
+struct MixRampItem {
+	FloatDuration time;
+	double volume;
+
+	constexpr bool operator==(const MixRampItem &other) const noexcept {
+		return time == other.time && volume == other.volume;
+	}
+
+	constexpr bool operator!=(const MixRampItem &other) const noexcept {
+		return !(*this == other);
+	}
+};
+
+using MixRampArray = std::array<MixRampItem, mixramp_volumes.size()>;
+
+struct MixRampData {
+	MixRampArray start, end;
+
+	constexpr MixRampData() noexcept:start{}, end{} {
+		for (std::size_t i = 0; i < mixramp_volumes.size(); ++i) {
+			start[i].time = end[i].time = FloatDuration{-1};
+			start[i].volume = end[i].volume = mixramp_volumes[i];
+		}
+	}
+
+	void Add(MixRampItem item) noexcept;
+};
+
+/**
+ * Analyze a 44.1 kHz / stereo / float32 audio stream and calculate
+ * MixRamp tags.
+ */
+class MixRampAnalyzer {
+	static constexpr std::size_t chunk_duration_fraction = 10;
+	static constexpr std::size_t chunk_frames =
+		ReplayGainAnalyzer::SAMPLE_RATE / chunk_duration_fraction;
+	static constexpr FloatDuration chunk_duration{1.0 / chunk_duration_fraction};
+
+	WindowReplayGainAnalyzer gain_analyzer;
+
+	MixRampData result;
+
+	std::size_t chunk_number = 0;
+
+	std::size_t chunk_fill = 0;
+
+public:
+	void Process(std::span<const ReplayGainAnalyzer::Frame> src) noexcept;
+
+	FloatDuration GetTime() const noexcept {
+		return chunk_number * chunk_duration;
+	}
+
+	const auto &GetResult() const noexcept {
+		return result;
+	}
+};

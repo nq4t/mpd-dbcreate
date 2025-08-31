@@ -1,0 +1,31 @@
+util = static_library(
+  'util',
+  'Exception.cxx',
+  'UTF8.cxx',
+  'MimeType.cxx',
+  'TruncateString.cxx',
+  'StringStrip.cxx',
+  'StringUtil.cxx',
+  'StringCompare.cxx',
+  'WStringCompare.cxx',
+  'SplitString.cxx',
+  'Tokenizer.cxx',
+  'UriExtract.cxx',
+  'UriQueryParser.cxx',
+  'UriRelative.cxx',
+  'UriUtil.cxx',
+  'LazyRandomEngine.cxx',
+  'HugeAllocator.cxx',
+  'PeakBuffer.cxx',
+  'PrintException.cxx',
+  'SparseBuffer.cxx',
+  'ByteReverse.cxx',
+  'format.c',
+  'BitReverse.cxx',
+  'Serial.cxx',
+  include_directories: inc,
+)
+
+util_dep = declare_dependency(
+  link_with: util,
+)

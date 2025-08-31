@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: BSD-2-Clause
+// author: Max Kellermann <max.kellermann@gmail.com>
+
+#ifndef CDIO_PARANOIA_HXX
+#define CDIO_PARANOIA_HXX
+
+#include <cdio/version.h>
+#include <cdio/paranoia/paranoia.h>
+
+#include <span>
+#include <stdexcept>
+#include <utility>
+
+#include <cstdio>
+
+class CdromDrive {
+	cdrom_drive_t *drv = nullptr;
+
+public:
+	CdromDrive() = default;
+
+	explicit CdromDrive(CdIo_t *cdio)
+		:drv(cdio_cddap_identify_cdio(cdio, 1, nullptr))
+	{
+		if (drv == nullptr)
+			throw std::runtime_error("Failed to identify audio CD");
+
+		cdda_verbose_set(drv, CDDA_MESSAGE_FORGETIT,
+				 CDDA_MESSAGE_FORGETIT);
+	}
+
+	~CdromDrive() noexcept {
+		if (drv != nullptr)
+			cdio_cddap_close_no_free_cdio(drv);
+	}
+
+	CdromDrive(CdromDrive &&src) noexcept
+		:drv(std::exchange(src.drv, nullptr)) {}
+
+	CdromDrive &operator=(CdromDrive &&src) noexcept {
+		using std::swap;
+		swap(drv, src.drv);
+		return *this;
+	}
+
+	auto get() const noexcept {
+		return drv;
+	}
+
+	void Open() {
+		if (cdio_cddap_open(drv) != 0)
+			throw std::runtime_error("Failed to open disc");
+	}
+
+	auto GetDiscSectorRange() const {
+		auto first = cdio_cddap_disc_firstsector(drv);
+		auto last = cdio_cddap_disc_lastsector(drv);
+		if (first < 0 || last < 0)
+			throw std::runtime_error("Failed to get disc audio sectors");
+		return std::pair(first, last);
+	}
+
+	[[gnu::pure]]
+	bool IsAudioTrack(track_t i) const noexcept {
+		return cdio_cddap_track_audiop(drv, i);
+	}
+
+	auto GetTrackSectorRange(track_t i) const {
+		auto first = cdio_cddap_track_firstsector(drv, i);
+		auto last = cdio_cddap_track_lastsector(drv, i);
+		if (first < 0 || last < 0)
+			throw std::runtime_error("Invalid track number");
+		return std::pair(first, last);
+	}
+
+	[[gnu::pure]]
+	unsigned GetTrackCount() const noexcept {
+		return cdio_cddap_tracks(drv);
+	}
+
+	unsigned GetTrackChannels(track_t i) const {
+		auto value = cdio_cddap_track_channels(drv, i);
+		if (value < 0)
+			throw std::runtime_error("cdio_cddap_track_channels() failed");
+		return unsigned(value);
+	}
+};
+
+class CdromParanoia {
+	cdrom_paranoia_t *paranoia = nullptr;
+
+public:
+	CdromParanoia() = default;
+
+	explicit CdromParanoia(cdrom_drive_t *drv) noexcept
+		:paranoia(cdio_paranoia_init(drv)) {}
+
+	~CdromParanoia() noexcept {
+		if (paranoia != nullptr)
+			cdio_paranoia_free(paranoia);
+	}
+
+	CdromParanoia(CdromParanoia &&src) noexcept
+		:paranoia(std::exchange(src.paranoia, nullptr)) {}
+
+	CdromParanoia &operator=(CdromParanoia &&src) noexcept {
+		using std::swap;
+		swap(paranoia, src.paranoia);
+		return *this;
+	}
+
+	auto get() const noexcept {
+		return paranoia;
+	}
+
+	void SetMode(int mode_flags) noexcept {
+		paranoia_modeset(paranoia, mode_flags);
+	}
+
+	void Seek(int32_t seek, int whence=SEEK_SET) {
+		if (cdio_paranoia_seek(paranoia, seek, whence) < 0)
+			throw std::runtime_error("Failed to seek disc");
+	}
+
+	std::span<const int16_t> Read() {
+		const int16_t *data = cdio_paranoia_read(paranoia, nullptr);
+		if (data == nullptr)
+			throw std::runtime_error("Read from audio CD failed");
+
+		return {data, CDIO_CD_FRAMESIZE_RAW / sizeof(int16_t)};
+	}
+};
+
+#endif

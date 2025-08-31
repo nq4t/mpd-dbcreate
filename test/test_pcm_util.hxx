@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright The Music Player Daemon Project
+
+#include <gtest/gtest.h>
+
+#include <array>
+#include <random>
+#include <span>
+
+#include <stddef.h>
+#include <stdint.h>
+
+template<typename T>
+struct RandomInt {
+	typedef std::minstd_rand Engine;
+	Engine engine;
+
+	static_assert(sizeof(T) <= sizeof(Engine::result_type),
+		      "RNG result type too small");
+
+	T operator()() {
+		return T(engine());
+	}
+};
+
+struct RandomInt24 : RandomInt<int32_t> {
+	int32_t operator()() {
+		auto t = RandomInt::operator()();
+		t &= 0xffffff;
+		if (t & 0x800000)
+			t |= 0xff000000;
+		return t;
+	}
+};
+
+struct RandomFloat {
+	std::mt19937 gen;
+	std::uniform_real_distribution<float> dis;
+
+	RandomFloat():gen(std::random_device()()), dis(-1.0, 1.0) {}
+
+	float operator()() {
+		return dis(gen);
+	}
+};
+
+template<typename T, size_t N>
+class TestDataBuffer : std::array<T, N> {
+public:
+	using typename std::array<T, N>::const_pointer;
+	using std::array<T, N>::size;
+	using std::array<T, N>::begin;
+	using std::array<T, N>::end;
+	using std::array<T, N>::operator[];
+
+	template<typename G=RandomInt<T>>
+	TestDataBuffer(G g=G()):std::array<T, N>() {
+		for (auto &i : *this)
+			i = g();
+
+	}
+
+	operator typename std::array<T, N>::const_pointer() const {
+		return begin();
+	}
+
+	operator std::span<const T>() const {
+		return { begin(), size() };
+	}
+
+	operator std::span<const std::byte>() const {
+		return { (const std::byte *)begin(), size() * sizeof(T) };
+	}
+};
+
+template<typename T>
+bool
+AssertEqualWithTolerance(const T &a, const T &b, unsigned tolerance)
+{
+	EXPECT_EQ(a.size(), b.size());
+
+	for (unsigned i = 0; i < a.size(); ++i) {
+		int64_t x = a[i], y = b[i];
+
+		EXPECT_GE(x, y - int64_t(tolerance));
+		EXPECT_LE(x, y + int64_t(tolerance));
+	}
+
+	return true;
+}
