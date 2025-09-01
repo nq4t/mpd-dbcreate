@@ -105,19 +105,21 @@ void dvda_disc_t::get_info(uint32_t track_index, bool downmix, TagHandler& handl
 	tag_value  = label_ok ? disc_label : "DVD-Audio";
 	handler.OnTag(TAG_DISC, tag_value.c_str());
 
+	// Clean album title - no format info appended
 	tag_value  = !disc_name.empty() ? disc_name : "Album";
-	tag_value += " (";
+	handler.OnTag(TAG_ALBUM, tag_value.c_str());
+	
+	// Store channel/format info in comment tag for reference
+	std::string comment_value = "DVDA_";
 	if (!downmix) {
-		tag_value += std::to_string(info.group1_channels + info.group2_channels);
-		tag_value += "CH";
+		comment_value += std::to_string(info.group1_channels + info.group2_channels);
+		comment_value += "CH_";
 	}
 	else {
-		tag_value += "DMX";
+		comment_value += "DMX_";
 	}
-	tag_value += "-";
-	tag_value += info.stream_id == MLP_STREAM_ID ? (info.stream_type == STREAM_TYPE_MLP ? "MLP" : "TrueHD") : "PCM";
-	tag_value += ")";
-	handler.OnTag(TAG_ALBUM, tag_value.c_str());
+	comment_value += info.stream_id == MLP_STREAM_ID ? (info.stream_type == STREAM_TYPE_MLP ? "MLP" : "TrueHD") : "PCM";
+	handler.OnTag(TAG_COMMENT, comment_value.c_str());
 
 	tag_value  = "Artist";
 	handler.OnTag(TAG_ARTIST, tag_value.c_str());
@@ -125,42 +127,11 @@ void dvda_disc_t::get_info(uint32_t track_index, bool downmix, TagHandler& handl
 	char track_number_string[16];
 	//sprintf(track_number_string, "%02d.%02d.%02d", ts, ti, tr);
 	sprintf(track_number_string, "%02d", tr);
+	
+	// Clean track title - just track number and name
 	tag_value  = track_number_string;
 	tag_value += " - ";
 	tag_value += "Track " + std::to_string(tr);
-	tag_value += " (";
-	if (!(downmix && track_list.get_track_by_index(track_index).audio_stream_info.can_downmix)) {
-		for (int i = 0; i < info.group1_channels; i++) {
-			if (i > 0) {
-				tag_value += "-";
-			}
-			tag_value += info.get_channel_name(i);
-		}
-		tag_value += " ";
-		tag_value += std::to_string(info.group1_bits);
-		tag_value += "/";
-		tag_value += std::to_string(info.group1_samplerate);
-		if (info.group2_channels > 0) {
-			tag_value += " + ";
-			for (int i = 0; i < info.group2_channels; i++) {
-				if (i > 0) {
-					tag_value += "-";
-				}
-				tag_value += info.get_channel_name(info.group1_channels + i);
-			}
-			tag_value += " ";
-			tag_value += std::to_string(info.group2_bits);
-			tag_value += "/";
-			tag_value += std::to_string(info.group2_samplerate);
-		}
-	}
-	else {
-		tag_value += "DMX ";
-		tag_value += std::to_string(info.group1_bits);
-		tag_value += "/";
-		tag_value += std::to_string(info.group1_samplerate);
-	}
-	tag_value += ")";
 	handler.OnTag(TAG_TITLE, tag_value.c_str());
 
 	tag_value  = "Composer";

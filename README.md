@@ -1,4 +1,4 @@
-# mpd-dbcreate | Jay's MPD Database Creator - "Hot Diggity Daffodil!"
+# mpd-dbcreate | Jay's MPD Database Creator - "I'm 40% Dolomite!"
 
 It's mpd without the daemon and playback functionality. Creates an mpd database based on "better" rules regarding CUE sheets, multi-channel files, and SACD content.
 
@@ -52,6 +52,7 @@ SACD's are presented to mpd in a non-standard way; so we had to go down in to th
 We also cleaned up the tags! The plugin added technical information to the album and track title tags. It's ugly. Primarily putting the channel configuration and track number in the track title is a bit much. So...we clean everything up! Track titles are sanitized/cleaned to be just the title, same with the album titles. After all...if you're only running stereo content, then it's all stereo; you're not at a risk of picking the multichannel version. Likewise, if you've got a multi-channel database; you won't be getting any stereo content.
 
 And if you kept everything, you're still covered! We append (Stereo) or (Multichannel) to the album title. Clean, more human-readable. But we only do this on SACD. You'll have to tag your non-SACD multichannel releases yourself. (For now. It's literally not that difficult to have it mark non-SACD multi-channel; I just haven't done that yet.)
+
 
 ## Building
 
@@ -128,6 +129,7 @@ mpd-dbcreate --music-dir /path/to/media --database /path/to/file.db (--stereo|--
 ```
 28-AUG-2025 - Initial hacking of database tool from mpd-sacd itself. Multichannel, CUE, SACD logic updates.
 29-AUG-2025 - Removed systemd, output, and daemonization features where possible. Restored verbose output from systemd hijack. Got --update working.
+01-SEP-2025 - After being able to actually test DVD-Audio; modified DVD-Audio plugin to match SACD behavior for track and channel filtering.
 ```
 
 ## License

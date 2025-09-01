@@ -39,6 +39,7 @@
 #include "util/BitReverse.hxx"
 #include "util/UriExtract.hxx"
 #include "util/Domain.hxx"
+#include "lib/fmt/ToBuffer.hxx"
 #include "Log.hxx"
 
 #include <assert.h>
@@ -196,6 +197,16 @@ finish() noexcept {
 	my_av_log_set_default_callback();
 }
 
+// External function to get channel mode for database creation
+enum class ChannelMode {
+	STEREO,
+	MULTICHANNEL,
+	ALL
+};
+extern "C" __attribute__((weak)) ChannelMode GetChannelMode() noexcept {
+	return ChannelMode::ALL; // Default for normal MPD
+}
+
 static std::forward_list<DetachedSong>
 container_scan(Path path_fs) {
 	std::forward_list<DetachedSong> list;
@@ -205,58 +216,130 @@ container_scan(Path path_fs) {
 	TagBuilder tag_builder;
 	auto tail = list.before_begin();
 	auto suffix = path_fs.GetExtension();
+	
+	// Check our channel mode for database creation
+	auto channel_mode = GetChannelMode();
+	FmtDebug(dvdaiso_domain, "container_scan: GetChannelMode returned {}",
+		(channel_mode == ChannelMode::STEREO ? "STEREO" :
+		 channel_mode == ChannelMode::MULTICHANNEL ? "MULTICHANNEL" : "ALL"));
+	
 	for (auto track_index = 0u; track_index < dvda_reader->get_tracks(); track_index++) {
 		if (dvda_reader->select_track(track_index)) {
 			auto duration = dvda_reader->get_duration();
 			if (param_no_short_tracks && duration < SHORT_TRACK_SEC) {
 				continue;
 			}
-			auto add_track = false;
-			auto add_downmix = false;
-			switch (param_playable_area) {
-			case CHMODE_MULCH:
-				if (dvda_reader->get_channels() > 2) {
-					add_track = true;
+			
+			auto channels = dvda_reader->get_channels();
+			bool is_multichannel = channels > 2;
+			
+			// Filter based on channel mode
+			bool process_track = false;
+			bool process_downmix = false;
+			
+			// First check database creation channel mode
+			if (channel_mode == ChannelMode::STEREO) {
+				// Only process stereo tracks or downmixes of multichannel
+				if (!is_multichannel) {
+					process_track = true;
+				} else if (!param_no_downmixes && dvda_reader->can_downmix()) {
+					process_downmix = true;
 				}
-				break;
-			case CHMODE_TWOCH:
-				if (dvda_reader->get_channels() <= 2) {
-					add_track = true;
+			} else if (channel_mode == ChannelMode::MULTICHANNEL) {
+				// Only process multichannel tracks
+				if (is_multichannel) {
+					process_track = true;
 				}
-				if (!param_no_downmixes && dvda_reader->can_downmix()) {
-					add_downmix = true;
+			} else { // ChannelMode::ALL
+				// Process everything based on param_playable_area
+				switch (param_playable_area) {
+				case CHMODE_MULCH:
+					if (is_multichannel) {
+						process_track = true;
+					}
+					break;
+				case CHMODE_TWOCH:
+					if (!is_multichannel) {
+						process_track = true;
+					}
+					if (!param_no_downmixes && dvda_reader->can_downmix()) {
+						process_downmix = true;
+					}
+					break;
+				default:
+					process_track = true;
+					if (!param_no_downmixes && dvda_reader->can_downmix()) {
+						process_downmix = true;
+					}
+					break;
 				}
-				break;
-			default:
-				add_track = true;
-				if (!param_no_downmixes && dvda_reader->can_downmix()) {
-					add_downmix = true;
-				}
-				break;
 			}
+			
 			char area;
 			char track_name[64];
-			if (add_track) {
+			if (process_track) {
 				AddTagHandler h(tag_builder);
-				area = dvda_reader->get_channels() > 2 ? 'M' : 'S';
+				area = is_multichannel ? 'M' : 'S';
 				scan_info(track_index, false, h);
-				std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix),
-				tail = list.emplace_after(
-					tail,
-					track_name,
-					tag_builder.Commit()
-				);
+				
+				// Add channel indicator to album title in ALL mode
+				if (channel_mode == ChannelMode::ALL) {
+					auto tag = tag_builder.Commit();
+					const char *album = tag.GetValue(TAG_ALBUM);
+					if (album != nullptr) {
+						TagBuilder modified_builder(std::move(tag));
+						std::string new_album(album);
+						new_album += is_multichannel ? " (Multichannel)" : " (Stereo)";
+						modified_builder.RemoveType(TAG_ALBUM);
+						modified_builder.AddItem(TAG_ALBUM, new_album);
+						tag = modified_builder.Commit();
+					}
+					std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix);
+					tail = list.emplace_after(
+						tail,
+						track_name,
+						std::move(tag)
+					);
+				} else {
+					std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix);
+					tail = list.emplace_after(
+						tail,
+						track_name,
+						tag_builder.Commit()
+					);
+				}
 			}
-			if (add_downmix) {
+			if (process_downmix) {
 				AddTagHandler h(tag_builder);
 				area = 'D';
 				scan_info(track_index, true, h);
-				std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix),
-				tail = list.emplace_after(
-					tail,
-					track_name,
-					tag_builder.Commit()
-				);
+				
+				// Add channel indicator to album title in ALL mode for downmixes
+				if (channel_mode == ChannelMode::ALL) {
+					auto tag = tag_builder.Commit();
+					const char *album = tag.GetValue(TAG_ALBUM);
+					if (album != nullptr) {
+						TagBuilder modified_builder(std::move(tag));
+						std::string new_album(album);
+						new_album += " (Downmix)";
+						modified_builder.RemoveType(TAG_ALBUM);
+						modified_builder.AddItem(TAG_ALBUM, new_album);
+						tag = modified_builder.Commit();
+					}
+					std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix);
+					tail = list.emplace_after(
+						tail,
+						track_name,
+						std::move(tag)
+					);
+				} else {
+					std::sprintf(track_name, DVDA_TRACKXXX_FMT, track_index + 1, area, suffix);
+					tail = list.emplace_after(
+						tail,
+						track_name,
+						tag_builder.Commit()
+					);
+				}
 			}
 		}
 		else {
@@ -336,6 +419,33 @@ scan_file(Path path_fs, TagHandler& handler) noexcept {
 		LogError(dvdaiso_domain, "cannot get track number");
 		return false;
 	}
+	
+	// Check our channel mode for database creation
+	auto channel_mode = GetChannelMode();
+	
+	// Select the track to get channel info
+	if (!dvda_reader->select_track(track_index)) {
+		LogError(dvdaiso_domain, "cannot select track for scan");
+		return false;
+	}
+	
+	auto channels = dvda_reader->get_channels();
+	bool is_multichannel = channels > 2;
+	
+	// Filter based on channel mode
+	if (channel_mode == ChannelMode::STEREO) {
+		// Skip multichannel tracks unless it's a downmix
+		if (is_multichannel && !downmix) {
+			return false;
+		}
+	} else if (channel_mode == ChannelMode::MULTICHANNEL) {
+		// Skip stereo tracks and downmixes
+		if (!is_multichannel || downmix) {
+			return false;
+		}
+	}
+	// For ChannelMode::ALL, scan everything
+	
 	scan_info(track_index, downmix, handler);
 	return true;
 }
